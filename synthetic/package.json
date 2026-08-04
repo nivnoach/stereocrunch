@@ -1,0 +1,14 @@
+{
+  "name": "stl-stereo-renderer",
+  "version": "1.0.0",
+  "description": "Upload an STL, render it from two cameras (distance d, baseline o apart)",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.19.2",
+    "multer": "^2.0.1",
+    "pngjs": "^7.0.0"
+  }
+}

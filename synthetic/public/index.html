@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STL Stereo Camera Renderer</title>
+<style>
+  body { font-family: sans-serif; max-width: 480px; margin: 40px auto; }
+  label { display: block; margin-bottom: 12px; }
+  input[type="number"] { width: 100px; }
+</style>
+</head>
+<body>
+<h1>STL Stereo Camera Renderer</h1>
+<p>Upload an STL file and get two images of it, rendered from two cameras
+that are both distance <strong>d</strong> from the object and
+<strong>o</strong> apart from each other (like a stereo camera pair).</p>
+<form action="/render" method="POST" enctype="multipart/form-data">
+  <label>
+    STL file:<br>
+    <input type="file" name="stl" accept=".stl" required>
+  </label>
+  <label>
+    Distance d (camera to object):<br>
+    <input type="number" name="d" step="any" min="0.0001" value="200" required>
+  </label>
+  <label>
+    Opening o (distance between the two cameras):<br>
+    <input type="number" name="o" step="any" min="0" value="50" required>
+  </label>
+  <p>Object rotation, applied in order pitch &rarr; yaw &rarr; roll (degrees):</p>
+  <label>
+    rx (pitch, around X axis):<br>
+    <input type="number" name="rx" step="any" value="0">
+  </label>
+  <label>
+    ry (yaw, around Y axis):<br>
+    <input type="number" name="ry" step="any" value="0">
+  </label>
+  <label>
+    rz (roll, around Z axis):<br>
+    <input type="number" name="rz" step="any" value="0">
+  </label>
+  <button type="submit">Render</button>
+</form>
+
+<hr style="margin:32px 0;">
+
+<h1>Batch Render from CSV</h1>
+<p>Point this at a CSV file already on this machine, with a header row of
+<code>filename,d,o,rx,ry,rz</code> (rx/ry/rz optional, default 0). Each
+<code>filename</code> is resolved relative to the CSV's own folder. Output
+goes into a new <code>&lt;csv name&gt;_output</code> folder next to the CSV,
+with one subfolder per resolution (64x64, 128x128, 256x256), each containing
+<code>&lt;stl name&gt;_row&lt;N&gt;_left.png</code> / <code>_right.png</code>
+(the CSV row number keeps names unique if the same STL appears in multiple
+rows) plus a manifest CSV that reproduces the original rows with two
+appended columns, <code>left</code> and <code>right</code>.</p>
+<form action="/batch" method="POST">
+  <label>
+    Path to CSV file:<br>
+    <input type="text" name="csvPath" placeholder="/path/to/params.csv" style="width:100%;" required>
+  </label>
+  <button type="submit">Run Batch</button>
+</form>
+</body>
+</html>
