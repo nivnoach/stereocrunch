@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>STL Rotation Viewer</title>
+<style>
+  body { font-family: sans-serif; max-width: 640px; margin: 40px auto; }
+  canvas { border: 1px solid #ccc; display: block; touch-action: none; cursor: grab; }
+  canvas:active { cursor: grabbing; }
+  .row { display: flex; gap: 16px; margin: 10px 0; }
+  .row label { flex: 1; }
+  input[type="number"] { width: 100%; box-sizing: border-box; }
+  #csvLine { width: 100%; box-sizing: border-box; font-family: monospace; }
+  #hint { color: #666; font-size: 0.9em; }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/three-lib/build/three.module.js"
+  }
+}
+</script>
+</head>
+<body>
+<h1>STL Rotation Viewer</h1>
+<p>Load an STL, drag it to rotate, and read off the exact <code>rx</code>,
+<code>ry</code>, <code>rz</code> values to use in a CSV row for batch
+rendering. Rotation here uses the identical pitch&rarr;yaw&rarr;roll
+convention as the render/batch features, applied about the object's own
+center, so what you see is exactly what you'll get.</p>
+
+<label>STL file: <input type="file" id="stlFile" accept=".stl"></label>
+
+<p id="hint">Drag horizontally to yaw (ry), vertically to pitch (rx). Use the roll field for rz.</p>
+<canvas id="c" width="500" height="500"></canvas>
+
+<div class="row">
+  <label>rx (pitch)<br><input type="number" id="rxInput" step="any" value="0"></label>
+  <label>ry (yaw)<br><input type="number" id="ryInput" step="any" value="0"></label>
+  <label>rz (roll)<br><input type="number" id="rzInput" step="any" value="0"></label>
+  <label style="flex:0 0 auto; align-self:flex-end;"><button id="resetBtn" type="button">Reset</button></label>
+</div>
+
+<h3>CSV row</h3>
+<div class="row">
+  <label>d<br><input type="number" id="dInput" step="any" value="200"></label>
+  <label>o<br><input type="number" id="oInput" step="any" value="50"></label>
+</div>
+<input type="text" id="csvLine" readonly value="">
+<button id="copyBtn" type="button">Copy row</button>
+
+<script type="module">
+import * as THREE from 'three';
+import { STLLoader } from '/three-lib/examples/jsm/loaders/STLLoader.js';
+
+const canvas = document.getElementById('c');
+const width = canvas.width;
+const height = canvas.height;
+
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+renderer.setSize(width, height, false);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xffffff);
+scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+const key = new THREE.DirectionalLight(0xffffff, 0.8);
+key.position.set(1, 1, 1);
+scene.add(key);
+const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+fill.position.set(-1, -0.5, -1);
+scene.add(fill);
+
+const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 1);
+let mesh = null;
+let fileName = '';
+
+const state = { rx: 0, ry: 0, rz: 0 };
+
+// Matches renderer.js's rotatePoint exactly: pitch (X), then yaw (Y), then
+// roll (Z), i.e. the composite matrix Mz * My * Mx applied to each point.
+function applyRotation() {
+  if (!mesh) return;
+  const mx = new THREE.Matrix4().makeRotationX(THREE.MathUtils.degToRad(state.rx));
+  const my = new THREE.Matrix4().makeRotationY(THREE.MathUtils.degToRad(state.ry));
+  const mz = new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(state.rz));
+  const m = new THREE.Matrix4().multiplyMatrices(mz, my).multiply(mx);
+  mesh.matrix.copy(m);
+}
+
+function normalizeDeg(deg) {
+  let d = deg % 360;
+  if (d > 180) d -= 360;
+  if (d <= -180) d += 360;
+  return d;
+}
+
+function updateUI() {
+  document.getElementById('rxInput').value = normalizeDeg(state.rx).toFixed(2);
+  document.getElementById('ryInput').value = normalizeDeg(state.ry).toFixed(2);
+  document.getElementById('rzInput').value = normalizeDeg(state.rz).toFixed(2);
+  updateCsvLine();
+}
+
+function csvField(value) {
+  const s = String(value);
+  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function updateCsvLine() {
+  const d = document.getElementById('dInput').value || '0';
+  const o = document.getElementById('oInput').value || '0';
+  const rx = normalizeDeg(state.rx).toFixed(2);
+  const ry = normalizeDeg(state.ry).toFixed(2);
+  const rz = normalizeDeg(state.rz).toFixed(2);
+  document.getElementById('csvLine').value = [fileName, d, o, rx, ry, rz].map(csvField).join(',');
+}
+
+function render() {
+  applyRotation();
+  renderer.render(scene, camera);
+}
+
+function loadGeometry(geometry) {
+  geometry.computeBoundingBox();
+  const center = new THREE.Vector3();
+  geometry.boundingBox.getCenter(center);
+  geometry.translate(-center.x, -center.y, -center.z);
+  geometry.computeBoundingSphere();
+  geometry.computeVertexNormals();
+
+  const radius = Math.max(geometry.boundingSphere.radius, 1e-6);
+
+  if (mesh) scene.remove(mesh);
+  const material = new THREE.MeshPhongMaterial({ color: 0x2266cc, specular: 0x111111, shininess: 40 });
+  mesh = new THREE.Mesh(geometry, material);
+  mesh.matrixAutoUpdate = false;
+  scene.add(mesh);
+
+  const dist = radius * 2.8;
+  camera.near = Math.max(dist - radius * 2, 0.01);
+  camera.far = dist + radius * 4;
+  camera.position.set(0, 0, dist);
+  camera.lookAt(0, 0, 0);
+  camera.updateProjectionMatrix();
+
+  state.rx = 0; state.ry = 0; state.rz = 0;
+  updateUI();
+  render();
+}
+
+document.getElementById('stlFile').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  fileName = file.name;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const loader = new STLLoader();
+    const geometry = loader.parse(reader.result);
+    loadGeometry(geometry);
+  };
+  reader.readAsArrayBuffer(file);
+});
+
+// Drag: horizontal -> yaw (ry), vertical -> pitch (rx).
+const SENSITIVITY = 0.4;
+let dragging = false;
+let lastX = 0, lastY = 0;
+
+canvas.addEventListener('pointerdown', (e) => {
+  if (!mesh) return;
+  dragging = true;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  canvas.setPointerCapture(e.pointerId);
+});
+canvas.addEventListener('pointermove', (e) => {
+  if (!dragging) return;
+  const dx = e.clientX - lastX;
+  const dy = e.clientY - lastY;
+  lastX = e.clientX;
+  lastY = e.clientY;
+  state.ry += dx * SENSITIVITY;
+  state.rx += dy * SENSITIVITY;
+  updateUI();
+  render();
+});
+canvas.addEventListener('pointerup', (e) => {
+  dragging = false;
+  canvas.releasePointerCapture(e.pointerId);
+});
+
+for (const [id, axis] of [['rxInput', 'rx'], ['ryInput', 'ry'], ['rzInput', 'rz']]) {
+  document.getElementById(id).addEventListener('input', (e) => {
+    const v = parseFloat(e.target.value);
+    state[axis] = Number.isFinite(v) ? v : 0;
+    updateCsvLine();
+    render();
+  });
+}
+
+document.getElementById('dInput').addEventListener('input', updateCsvLine);
+document.getElementById('oInput').addEventListener('input', updateCsvLine);
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  state.rx = 0; state.ry = 0; state.rz = 0;
+  updateUI();
+  render();
+});
+
+document.getElementById('copyBtn').addEventListener('click', () => {
+  const line = document.getElementById('csvLine');
+  line.select();
+  navigator.clipboard.writeText(line.value);
+});
+</script>
+
+<p><a href="/">Back</a></p>
+</body>
+</html>

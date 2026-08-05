@@ -30,6 +30,7 @@ const upload = multer({
 
 app.use(express.static(path.join(__dirname, 'public')));
 app.use(express.urlencoded({ extended: false }));
+app.use('/three-lib', express.static(path.join(__dirname, 'node_modules', 'three')));
 
 app.post('/render', (req, res) => {
   upload.single('stl')(req, res, (err) => {

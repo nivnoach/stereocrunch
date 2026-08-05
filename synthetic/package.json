@@ -9,6 +9,7 @@
   "dependencies": {
     "express": "^4.19.2",
     "multer": "^2.0.1",
-    "pngjs": "^7.0.0"
+    "pngjs": "^7.0.0",
+    "three": "^0.160.1"
   }
 }
