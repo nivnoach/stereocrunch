@@ -74,12 +74,20 @@ function parseNumber(value, fallback) {
  * same STL is referenced by multiple rows with different parameters.
  * A failing row is recorded in the results and does not abort the rest of the batch.
  *
+ * `skipLineNos` (a Set of CSV line numbers) excludes rows from rendering
+ * entirely. `rotationOverrides` (a Map of line number -> {rx, ry, rz}) lets
+ * a row's rotation be adjusted (e.g. from the batch preview UI) without
+ * editing the source CSV; d/o are never overridden.
+ *
  * Each <size>x<size> folder also gets a manifest CSV (same name as the
  * original) that reproduces every original row plus two appended columns,
  * "left" and "right", holding the image filenames (blank for rows that
- * failed to render). Fields are CSV-quoted as needed on the way out.
+ * failed or were skipped). If the header has rx/ry/rz columns, an
+ * overridden row's values there are replaced with the *effective* values
+ * actually used to render, so the manifest always matches the image (these
+ * are the DNN's ground-truth labels). Fields are CSV-quoted as needed.
  */
-function processBatch(csvPath) {
+function processBatch(csvPath, { skipLineNos = new Set(), rotationOverrides = new Map() } = {}) {
   const csvDir = path.dirname(csvPath);
   const csvBaseName = path.basename(csvPath, path.extname(csvPath));
   const outputRoot = path.join(csvDir, `${csvBaseName}_output`);
@@ -90,6 +98,10 @@ function processBatch(csvPath) {
 
   const text = fs.readFileSync(csvPath, 'utf8');
   const { headerRaw, rows } = parseCSV(text);
+  const headerLower = headerRaw.map((h) => h.toLowerCase());
+  const rxIdx = headerLower.indexOf('rx');
+  const ryIdx = headerLower.indexOf('ry');
+  const rzIdx = headerLower.indexOf('rz');
 
   const manifestLines = {};
   for (const size of SIZES) {
@@ -125,9 +137,10 @@ function processBatch(csvPath) {
 
     const d = parseNumber(row.d, NaN);
     const o = parseNumber(row.o, NaN);
-    const rx = parseNumber(row.rx, 0);
-    const ry = parseNumber(row.ry, 0);
-    const rz = parseNumber(row.rz, 0);
+    const override = rotationOverrides.get(lineNo);
+    const rx = override ? override.rx : parseNumber(row.rx, 0);
+    const ry = override ? override.ry : parseNumber(row.ry, 0);
+    const rz = override ? override.rz : parseNumber(row.rz, 0);
 
     if (!Number.isFinite(d) || d <= 0) {
       return fail(`Invalid d: "${row.d}"`);
@@ -139,10 +152,32 @@ function processBatch(csvPath) {
       return fail('Invalid rx, ry, or rz');
     }
 
+    if (override) {
+      if (rxIdx >= 0) paddedValues[rxIdx] = String(rx);
+      if (ryIdx >= 0) paddedValues[ryIdx] = String(ry);
+      if (rzIdx >= 0) paddedValues[rzIdx] = String(rz);
+    }
+
+    if (skipLineNos.has(lineNo)) {
+      for (const size of SIZES) {
+        manifestLines[size].push(csvLine([...paddedValues, '', '']));
+      }
+      console.log(`${progress} ${filename}: SKIPPED`);
+      return { lineNo, filename, ok: false, skipped: true };
+    }
+
     try {
       const baseName = path.basename(filename, path.extname(filename));
-      const leftName = `${baseName}_row${lineNo}_left.png`;
-      const rightName = `${baseName}_row${lineNo}_right.png`;
+      // Note: two rows referencing the same STL whose d rounds to the same
+      // 2 decimals would collide here and overwrite each other's images
+      // (and desync the manifest, which still records both rows) — low risk
+      // for randomly-generated permutations, but a real risk for hand-typed
+      // CSVs with duplicate d on the same filename.
+      // No '.' in the label — some tools mistake a mid-name period for a
+      // false file-extension separator — so "." becomes "p" (242.20 -> 242p20).
+      const dLabel = 'd' + d.toFixed(2).replace('.', 'p');
+      const leftName = `${baseName}_${dLabel}_left.PNG`;
+      const rightName = `${baseName}_${dLabel}_right.PNG`;
       const pairs = renderStereoPairs(stlPath, d, o, { rx, ry, rz }, SIZES);
       for (const { size, image1, image2 } of pairs) {
         const dir = path.join(outputRoot, `${size}x${size}`);
@@ -168,4 +203,4 @@ function processBatch(csvPath) {
   return { outputRoot, results };
 }
 
-module.exports = { processBatch, parseCSVLine, csvField, csvLine };
+module.exports = { processBatch, parseCSV, parseNumber, parseCSVLine, csvField, csvLine };

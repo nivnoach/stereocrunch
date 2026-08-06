@@ -5,6 +5,11 @@ const { PNG } = require('pngjs');
 
 const SS = 2; // supersampling factor for basic anti-aliasing
 const SIZES = [64, 128, 256];
+// The camera-distance-to-radius ratio that produces a "naturally framed"
+// shot (matches viewer.html's auto-frame distance and the folder-preview
+// default d). Used as the reference apparent size that distance-compensated
+// renders are zoomed to match, regardless of the actual d used.
+const DEFAULT_DISTANCE_MULTIPLIER = 2.8;
 
 function parseSTL(buffer) {
   const triangles = [];
@@ -109,7 +114,7 @@ function rotateTriangles(triangles, rxDeg, ryDeg, rzDeg) {
   return triangles.map((tri) => tri.map((v) => rotatePoint(v, rx, ry, rz)));
 }
 
-function renderView(triangles, radius, { eye, target, up, d, width, height, fov = 45 }) {
+function renderView(triangles, radius, { eye, target, up, d, width, height, fov = 45, compensateDistance = false, grayscale = false }) {
   const w = width * SS;
   const h = height * SS;
 
@@ -118,7 +123,15 @@ function renderView(triangles, radius, { eye, target, up, d, width, height, fov 
   const camUp = cross(right, forward);
 
   const near = Math.max(d - radius * 1.5, 0.01);
-  const scale = 1 / Math.tan((fov * Math.PI) / 180 / 2);
+  const baseScale = 1 / Math.tan((fov * Math.PI) / 180 / 2);
+  // Apparent size of an object at distance d is proportional to 1/d for a
+  // fixed scale; to cancel that out (so distance permutations of the same
+  // STL all look the same size — otherwise a model could learn to infer
+  // distance from apparent size instead of stereo disparity), zoom in
+  // proportionally to d, referenced against the distance that would
+  // naturally frame this object at the default fov.
+  const referenceD = radius * DEFAULT_DISTANCE_MULTIPLIER;
+  const scale = compensateDistance ? baseScale * (d / referenceD) : baseScale;
   const aspect = w / h;
 
   const lightDir = normalize([0.4, 0.6, 1]);
@@ -190,10 +203,10 @@ function renderView(triangles, radius, { eye, target, up, d, width, height, fov 
     }
   }
 
-  return downsample(framebuffer, w, h, width, height);
+  return downsample(framebuffer, w, h, width, height, grayscale);
 }
 
-function downsample(framebuffer, w, h, outW, outH) {
+function downsample(framebuffer, w, h, outW, outH, grayscale = false) {
   const png = new PNG({ width: outW, height: outH });
   for (let y = 0; y < outH; y++) {
     for (let x = 0; x < outW; x++) {
@@ -207,14 +220,50 @@ function downsample(framebuffer, w, h, outW, outH) {
         }
       }
       const n = SS * SS;
+      let rOut = Math.min(255, Math.round(r / n));
+      let gOut = Math.min(255, Math.round(g / n));
+      let bOut = Math.min(255, Math.round(b / n));
+      if (grayscale) {
+        // Rec. 601 luma weights.
+        const lum = Math.round(0.299 * rOut + 0.587 * gOut + 0.114 * bOut);
+        rOut = gOut = bOut = lum;
+      }
       const outIdx = (y * outW + x) * 4;
-      png.data[outIdx] = Math.min(255, Math.round(r / n));
-      png.data[outIdx + 1] = Math.min(255, Math.round(g / n));
-      png.data[outIdx + 2] = Math.min(255, Math.round(b / n));
+      png.data[outIdx] = rOut;
+      png.data[outIdx + 1] = gOut;
+      png.data[outIdx + 2] = bOut;
       png.data[outIdx + 3] = 255;
     }
   }
-  return PNG.sync.write(png);
+  // png.data is always laid out RGBA regardless of output format; passing
+  // colorType 0 (true single-channel grayscale, per the PNG spec) here has
+  // pngjs collapse it on write instead of writing a 4x-larger RGBA file
+  // with R=G=B in every pixel.
+  return grayscale
+    ? PNG.sync.write(png, { colorType: 0, inputColorType: 6 })
+    : PNG.sync.write(png);
+}
+
+// Loads an STL, centers it, and applies (rx, ry, rz) degree rotation about
+// its own center, returning triangles ready for renderView plus the
+// bounding radius. Shared by renderStereoPairs and renderPreview.
+function loadAndPrepare(stlPath, rx, ry, rz) {
+  const buffer = fs.readFileSync(stlPath);
+  const parsed = parseSTL(buffer);
+  const { triangles: centered, radius } = centerAndBounds(parsed);
+  const triangles = rotateTriangles(centered, rx, ry, rz);
+  return { triangles, radius };
+}
+
+// Just the bounding radius of an STL, with no rotation/rasterization work.
+// Note this still pays nearly the full parse cost of loadAndPrepare (the
+// triangle-array parse dominates the time, not the rendering), so callers
+// with many files should treat this as no cheaper than a preview render.
+function getBoundingRadius(stlPath) {
+  const buffer = fs.readFileSync(stlPath);
+  const parsed = parseSTL(buffer);
+  const { radius } = centerAndBounds(parsed);
+  return radius;
 }
 
 /**
@@ -223,23 +272,43 @@ function downsample(framebuffer, w, h, outW, outH) {
  * center, distance d away, separated by baseline o. The object is rotated
  * by (rx, ry, rz) degrees (pitch, yaw, roll) about its own center before
  * rendering. The STL is parsed and rotated once and reused across sizes.
+ *
+ * Output is grayscale, and zoom is compensated for d (see renderView) so
+ * that distance permutations of the same STL all appear the same apparent
+ * size — the training images shouldn't let a model infer distance from
+ * apparent size, only from stereo disparity. Preview thumbnails elsewhere
+ * intentionally do NOT get this treatment (renderPreview doesn't set these
+ * flags) since they're for human alignment-checking, not training data.
  */
 function renderStereoPairs(stlPath, d, o, { rx = 0, ry = 0, rz = 0 } = {}, sizes = SIZES) {
-  const buffer = fs.readFileSync(stlPath);
-  const parsed = parseSTL(buffer);
-  const { triangles: centered, radius } = centerAndBounds(parsed);
-  const triangles = rotateTriangles(centered, rx, ry, rz);
+  const { triangles, radius } = loadAndPrepare(stlPath, rx, ry, rz);
 
   const up = [0, 1, 0];
   return sizes.map((size) => {
     const image1 = renderView(triangles, radius, {
-      eye: [-o / 2, 0, d], target: [0, 0, 0], up, d, width: size, height: size
+      eye: [-o / 2, 0, d], target: [0, 0, 0], up, d, width: size, height: size,
+      compensateDistance: true, grayscale: true
     });
     const image2 = renderView(triangles, radius, {
-      eye: [o / 2, 0, d], target: [0, 0, 0], up, d, width: size, height: size
+      eye: [o / 2, 0, d], target: [0, 0, 0], up, d, width: size, height: size,
+      compensateDistance: true, grayscale: true
     });
     return { size, image1, image2 };
   });
 }
 
-module.exports = { renderStereoPairs, SIZES };
+/**
+ * Renders a single quick preview image (left camera only, one small size)
+ * of an STL for the given d/o/rotation, so a planned render's alignment
+ * can be eyeballed cheaply without paying for the full stereo/multi-size
+ * batch render.
+ */
+function renderPreview(stlPath, d, o, { rx = 0, ry = 0, rz = 0 } = {}, size = 160) {
+  const { triangles, radius } = loadAndPrepare(stlPath, rx, ry, rz);
+  const up = [0, 1, 0];
+  return renderView(triangles, radius, {
+    eye: [-o / 2, 0, d], target: [0, 0, 0], up, d, width: size, height: size
+  });
+}
+
+module.exports = { renderStereoPairs, renderPreview, getBoundingRadius, SIZES, DEFAULT_DISTANCE_MULTIPLIER };

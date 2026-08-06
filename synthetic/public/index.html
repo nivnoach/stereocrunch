@@ -45,22 +45,55 @@ that are both distance <strong>d</strong> from the object and
 
 <hr style="margin:32px 0;">
 
-<h1>Batch Render from CSV</h1>
+<h1>1. Folder Preview</h1>
+<p>Point this at a folder of raw STLs (default orientation, no CSV needed
+yet). Review a thumbnail per file, skip ones you don't want, and align
+misaligned ones in the 3D viewer &mdash; each file's default distance is
+auto-computed from its own size. Save your selections as a base CSV, one
+row per kept file.</p>
+<form action="/folder/preview" method="GET">
+  <label>
+    Path to STL folder:<br>
+    <input type="text" name="stlFolder" placeholder="/path/to/stl_data" style="width:100%;" required>
+  </label>
+  <button type="submit">Preview Folder</button>
+</form>
+
+<hr style="margin:32px 0;">
+
+<h1>2. Generate Permutations</h1>
+<p>Takes a base CSV (e.g. from Folder Preview) and expands each row into
+several rows with distance randomized within a multiplier range of that
+row's own <code>d</code>. Rotation is copied unchanged.</p>
+<form action="/permute" method="GET">
+  <label>
+    Path to base CSV file:<br>
+    <input type="text" name="csvPath" placeholder="/path/to/base.csv" style="width:100%;" required>
+  </label>
+  <button type="submit">Generate Permutations</button>
+</form>
+
+<hr style="margin:32px 0;">
+
+<h1>3. Batch Render from CSV</h1>
 <p>Point this at a CSV file already on this machine, with a header row of
 <code>filename,d,o,rx,ry,rz</code> (rx/ry/rz optional, default 0). Each
-<code>filename</code> is resolved relative to the CSV's own folder. Output
-goes into a new <code>&lt;csv name&gt;_output</code> folder next to the CSV,
-with one subfolder per resolution (64x64, 128x128, 256x256), each containing
+<code>filename</code> is resolved relative to the CSV's own folder. You'll
+land on a preview page first, with a thumbnail per row to check alignment,
+checkboxes to skip rows, and a link to fix a misaligned row's rotation in
+the 3D viewer before the batch actually runs. Output goes into a new
+<code>&lt;csv name&gt;_output</code> folder next to the CSV, with one
+subfolder per resolution (64x64, 128x128, 256x256), each containing
 <code>&lt;stl name&gt;_row&lt;N&gt;_left.png</code> / <code>_right.png</code>
 (the CSV row number keeps names unique if the same STL appears in multiple
 rows) plus a manifest CSV that reproduces the original rows with two
 appended columns, <code>left</code> and <code>right</code>.</p>
-<form action="/batch" method="POST">
+<form action="/batch/preview" method="GET">
   <label>
     Path to CSV file:<br>
     <input type="text" name="csvPath" placeholder="/path/to/params.csv" style="width:100%;" required>
   </label>
-  <button type="submit">Run Batch</button>
+  <button type="submit">Preview Batch</button>
 </form>
 
 <hr style="margin:32px 0;">

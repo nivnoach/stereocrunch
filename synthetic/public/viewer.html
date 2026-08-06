@@ -29,6 +29,8 @@ rendering. Rotation here uses the identical pitch&rarr;yaw&rarr;roll
 convention as the render/batch features, applied about the object's own
 center, so what you see is exactly what you'll get.</p>
 
+<div id="batchEditBanner" style="display:none; background:#eef; border:1px solid #99c; padding:10px; margin-bottom:16px;"></div>
+
 <label>STL file: <input type="file" id="stlFile" accept=".stl"></label>
 
 <p id="hint">Drag horizontally to yaw (ry), vertically to pitch (rx). Use the roll field for rz.</p>
@@ -120,7 +122,7 @@ function render() {
   renderer.render(scene, camera);
 }
 
-function loadGeometry(geometry) {
+function loadGeometry(geometry, initial = { rx: 0, ry: 0, rz: 0 }) {
   geometry.computeBoundingBox();
   const center = new THREE.Vector3();
   geometry.boundingBox.getCenter(center);
@@ -143,7 +145,7 @@ function loadGeometry(geometry) {
   camera.lookAt(0, 0, 0);
   camera.updateProjectionMatrix();
 
-  state.rx = 0; state.ry = 0; state.rz = 0;
+  state.rx = initial.rx; state.ry = initial.ry; state.rz = initial.rz;
   updateUI();
   render();
 }
@@ -160,6 +162,53 @@ document.getElementById('stlFile').addEventListener('change', (e) => {
   };
   reader.readAsArrayBuffer(file);
 });
+
+// Loads an STL straight from the server by absolute path, so the batch
+// preview's "Adjust rotation..." link can drop the user here with the
+// right mesh already showing instead of requiring a manual file pick.
+async function loadFromServer(stlPath, initial) {
+  fileName = stlPath.split('/').pop();
+  const resp = await fetch('/stl-file?path=' + encodeURIComponent(stlPath));
+  if (!resp.ok) {
+    alert('Failed to load STL from server: ' + (await resp.text()));
+    return;
+  }
+  const buf = await resp.arrayBuffer();
+  const loader = new STLLoader();
+  const geometry = loader.parse(buf);
+  loadGeometry(geometry, initial);
+}
+
+// Batch-preview round trip: if opened with stlPath/returnUrl/lineNo, auto-load
+// the mesh, preset its rotation, and offer a "Done" button that writes this
+// row's rx/ry/rz straight back into the return URL's query string (no manual
+// copy/paste) before navigating back to the preview.
+const urlParams = new URLSearchParams(location.search);
+const initStlPath = urlParams.get('stlPath');
+const returnUrl = urlParams.get('returnUrl');
+const lineNo = urlParams.get('lineNo');
+
+if (returnUrl && lineNo) {
+  const banner = document.getElementById('batchEditBanner');
+  banner.style.display = 'block';
+  banner.innerHTML = `Editing rotation for batch preview row ${lineNo}. `
+    + `<button type="button" id="doneBtn" style="font-weight:bold;">Done &mdash; apply &amp; return</button>`;
+  document.getElementById('doneBtn').addEventListener('click', () => {
+    const target = new URL(returnUrl, location.origin);
+    target.searchParams.set(`rx_${lineNo}`, normalizeDeg(state.rx).toFixed(2));
+    target.searchParams.set(`ry_${lineNo}`, normalizeDeg(state.ry).toFixed(2));
+    target.searchParams.set(`rz_${lineNo}`, normalizeDeg(state.rz).toFixed(2));
+    window.location.href = target.toString();
+  });
+}
+
+if (initStlPath) {
+  loadFromServer(initStlPath, {
+    rx: parseFloat(urlParams.get('rx')) || 0,
+    ry: parseFloat(urlParams.get('ry')) || 0,
+    rz: parseFloat(urlParams.get('rz')) || 0
+  });
+}
 
 // Drag: horizontal -> yaw (ry), vertical -> pitch (rx).
 const SENSITIVITY = 0.4;
