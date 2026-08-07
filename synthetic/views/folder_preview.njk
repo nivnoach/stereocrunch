@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html>
+<head><title>Folder Preview</title></head>
+<body style="font-family:sans-serif; max-width:720px; margin:40px auto;">
+  <h1>Folder Preview</h1>
+  <p>Folder: <code>{{ resolvedFolder }}</code> ({{ fileCount }} STL files)</p>
+  <p>Each file's default distance is auto-computed from its own size once its
+  thumbnail loads (parsing a large STL can take a moment per file). Skip
+  files you don't want, or click "Adjust rotation&hellip;" to align a
+  misaligned one in the 3D viewer &mdash; it brings you right back here.</p>
+  <form method="POST" action="/folder/save">
+    <input type="hidden" name="stlFolder" value="{{ resolvedFolder }}">
+    <label>Baseline o (shared by all rows): <input type="number" step="any" name="o" value="{{ o }}" style="width:90px;"></label>
+    <div style="margin:16px 0;">
+      {% for row in rows %}
+        {% include "partials/folder_preview_row.njk" %}
+      {% endfor %}
+    </div>
+    <label>Save as CSV:<br><input type="text" name="outputCsvPath" value="{{ defaultOutputCsv }}" style="width:100%;"></label>
+    <button type="submit" style="margin-top:12px;">Save as CSV</button>
+  </form>
+  <p><a href="/">Back</a></p>
+  <script>
+    document.querySelectorAll('.folderRow').forEach((row) => {
+      const img = row.querySelector('.thumb');
+      const dInput = row.querySelector('.dInput');
+      const wasEmpty = dInput.value === '';
+      fetch(row.dataset.thumbBase)
+        .then((resp) => {
+          if (!resp.ok) return;
+          if (wasEmpty && dInput.value === '') {
+            const defaultD = resp.headers.get('X-Default-D');
+            if (defaultD) dInput.value = defaultD;
+          }
+          return resp.blob();
+        })
+        .then((blob) => { if (blob) img.src = URL.createObjectURL(blob); })
+        .catch(() => {});
+    });
+  </script>
+</body>
+</html>

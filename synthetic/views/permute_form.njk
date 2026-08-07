@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html>
+<head><title>Generate Permutations</title></head>
+<body style="font-family:sans-serif; max-width:560px; margin:40px auto;">
+  <h1>Generate Permutations</h1>
+  <p>Takes a CSV of aligned STLs (e.g. from Folder Preview) and generates
+  several rows per entry with distance randomized within a multiplier range
+  of that row's own <code>d</code>. Rotation (<code>rx/ry/rz</code>) is
+  copied unchanged &mdash; align rows first via Folder Preview or Batch
+  Preview, not here.</p>
+  <form method="POST" action="/permute">
+    <label>Input CSV path:<br><input type="text" name="csvPath" value="{{ csvPath }}" style="width:100%;" required></label><br><br>
+    <label>Permutations per entry:<br><input type="number" name="permutationsPerEntry" value="3" min="1" step="1" required></label><br><br>
+    <label>Distance multiplier min:<br><input type="number" name="distanceMultiplierMin" value="0.6" min="0.01" step="any" required></label><br><br>
+    <label>Distance multiplier max:<br><input type="number" name="distanceMultiplierMax" value="1.5" min="0.01" step="any" required></label><br><br>
+    <label>Output CSV path:<br><input type="text" name="outputCsvPath" value="{{ outputSuggestion }}" style="width:100%;" required></label><br><br>
+    <button type="submit">Generate</button>
+  </form>
+  <p><a href="/">Back</a></p>
+</body>
+</html>

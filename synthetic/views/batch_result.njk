@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html>
+<head><title>Batch Render</title></head>
+<body>
+  <h1>Batch Render Complete</h1>
+  <p>Output folder: <code>{{ outputRoot }}</code></p>
+  <p>Subfolders: {% for s in sizes %}{{ s }}x{{ s }}{% if not loop.last %}, {% endif %}{% endfor %}</p>
+  <table border="1" cellpadding="6" style="border-collapse:collapse;">
+    <tr><th>Line</th><th>Filename</th><th>Status</th><th>Details</th></tr>
+    {% for r in results %}
+    {% if r.skipped %}
+    <tr><td>{{ r.lineNo }}</td><td>{{ r.filename }}</td><td style="color:#888">SKIPPED</td><td>Excluded via batch preview</td></tr>
+    {% elif r.ok %}
+    <tr><td>{{ r.lineNo }}</td><td>{{ r.filename }}</td><td style="color:green">OK</td><td>d={{ r.d }}, o={{ r.o }}, rx={{ r.rx }}&deg;, ry={{ r.ry }}&deg;, rz={{ r.rz }}&deg;</td></tr>
+    {% else %}
+    <tr><td>{{ r.lineNo }}</td><td>{{ r.filename }}</td><td style="color:red">FAILED</td><td>{{ r.error }}</td></tr>
+    {% endif %}
+    {% endfor %}
+  </table>
+  <p><a href="/">Back</a></p>
+</body>
+</html>

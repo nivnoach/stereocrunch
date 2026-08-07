@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>Folder Saved</title></head>
+<body style="font-family:sans-serif; max-width:640px; margin:40px auto;">
+  <h1>Base CSV Saved</h1>
+  <p>Wrote <strong>{{ outRowsCount }}</strong> row(s) to <code>{{ resolvedOutputCsvPath }}</code>.</p>
+  {% if errors.length %}
+  <p style="color:#a00;">{{ errors.length }} file(s) excluded:</p>
+  <ul>
+    {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p><a href="/permute?csvPath={{ resolvedOutputCsvPath | urlencode }}">Next: Generate Permutations &rarr;</a></p>
+  <p><a href="/batch/preview?csvPath={{ resolvedOutputCsvPath | urlencode }}">Or: Preview this CSV directly &rarr;</a></p>
+  <p><a href="/">Back</a></p>
+</body>
+</html>

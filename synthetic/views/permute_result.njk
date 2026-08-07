@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html>
+<head><title>Permutations Generated</title></head>
+<body style="font-family:sans-serif; max-width:640px; margin:40px auto;">
+  <h1>Permutations Generated</h1>
+  <p>Wrote <strong>{{ outRowsCount }}</strong> row(s) ({{ n }} per entry, d in
+  [{{ min }}x, {{ max }}x] of each source row's own d) to <code>{{ resolvedOutputCsvPath }}</code>.</p>
+  {% if errors.length %}
+  <p style="color:#a00;">{{ errors.length }} source row(s) skipped:</p>
+  <ul>
+    {% for e in errors %}<li>{{ e }}</li>{% endfor %}
+  </ul>
+  {% endif %}
+  <p><a href="/batch/preview?csvPath={{ resolvedOutputCsvPath | urlencode }}">Review the generated CSV &rarr;</a></p>
+  <p><a href="/">Back</a></p>
+</body>
+</html>

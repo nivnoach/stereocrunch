@@ -1,0 +1,15 @@
+<!DOCTYPE html>
+<html>
+<head><title>Stereo Render</title></head>
+<body>
+  <h1>Stereo Render (d={{ d }}, o={{ o }}, rx={{ rx }}&deg;, ry={{ ry }}&deg;, rz={{ rz }}&deg;)</h1>
+  {% for pair in pairs %}
+  <h2>{{ pair.size }}x{{ pair.size }}</h2>
+  <div style="display:flex; gap:20px; margin-bottom:24px;">
+    <div><h3>Camera 1 (left)</h3><img src="{{ pair.img1 }}" width="{{ pair.size }}" height="{{ pair.size }}" style="image-rendering:pixelated; border:1px solid #ccc;"></div>
+    <div><h3>Camera 2 (right)</h3><img src="{{ pair.img2 }}" width="{{ pair.size }}" height="{{ pair.size }}" style="image-rendering:pixelated; border:1px solid #ccc;"></div>
+  </div>
+  {% endfor %}
+  <p><a href="/">Render another</a></p>
+</body>
+</html>

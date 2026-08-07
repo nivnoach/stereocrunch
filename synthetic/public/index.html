@@ -4,12 +4,49 @@
 <meta charset="utf-8">
 <title>STL Stereo Camera Renderer</title>
 <style>
-  body { font-family: sans-serif; max-width: 480px; margin: 40px auto; }
+  body { font-family: sans-serif; max-width: 720px; margin: 40px auto; }
   label { display: block; margin-bottom: 12px; }
   input[type="number"] { width: 100px; }
+
+  .pageHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
+
+  .tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 2px solid #ccc; margin-bottom: 24px; }
+  .tabBtn {
+    font: inherit; cursor: pointer; padding: 10px 16px; border: 1px solid #ccc; border-bottom: none;
+    background: #f2f2f2; border-radius: 6px 6px 0 0; color: #333;
+  }
+  .tabBtn.active { background: #fff; border-color: #999; font-weight: bold; margin-bottom: -2px; border-bottom: 2px solid #fff; }
+  .tabPanel h1 { font-size: 1.4em; }
+
+  .extraTools {
+    display: flex; flex-direction: column; gap: 6px; border: 1px solid #ccc; border-radius: 6px;
+    padding: 8px 10px; background: #fafafa;
+  }
+  .extraToolsLabel { font-size: 0.75em; text-transform: uppercase; letter-spacing: 0.05em; color: #888; }
+  .extraTools .tabBtn {
+    border-radius: 4px; border: 1px solid #ccc; background: #fff; padding: 6px 10px;
+    font-size: 0.85em; text-align: left;
+  }
+  .extraTools .tabBtn.active { margin-bottom: 0; border-bottom: 1px solid #99c; background: #eef; }
 </style>
 </head>
 <body>
+<div class="pageHeader">
+  <h1 style="font-size:1.8em; margin:0;">STL Synthetic Data Generator</h1>
+  <div class="extraTools">
+    <div class="extraToolsLabel">Extra Tools</div>
+    <button type="button" class="tabBtn" data-tab="renderer">STL Stereo Camera Renderer</button>
+    <button type="button" class="tabBtn" data-tab="rotationViewer">Rotation Viewer</button>
+  </div>
+</div>
+<br/><br/>
+<nav class="tabs">
+  <button type="button" class="tabBtn" data-tab="folderPreview">1. Folder Preview</button>
+  <button type="button" class="tabBtn" data-tab="permutations">2. Generate Permutations</button>
+  <button type="button" class="tabBtn" data-tab="batchRender">3. Batch Render from CSV</button>
+</nav>
+
+<section id="tab-renderer" class="tabPanel">
 <h1>STL Stereo Camera Renderer</h1>
 <p>Upload an STL file and get two images of it, rendered from two cameras
 that are both distance <strong>d</strong> from the object and
@@ -42,10 +79,9 @@ that are both distance <strong>d</strong> from the object and
   </label>
   <button type="submit">Render</button>
 </form>
+</section>
 
-<hr style="margin:32px 0;">
-
-<h1>1. Folder Preview</h1>
+<section id="tab-folderPreview" class="tabPanel" hidden>
 <p>Point this at a folder of raw STLs (default orientation, no CSV needed
 yet). Review a thumbnail per file, skip ones you don't want, and align
 misaligned ones in the 3D viewer &mdash; each file's default distance is
@@ -58,10 +94,9 @@ row per kept file.</p>
   </label>
   <button type="submit">Preview Folder</button>
 </form>
+</section>
 
-<hr style="margin:32px 0;">
-
-<h1>2. Generate Permutations</h1>
+<section id="tab-permutations" class="tabPanel" hidden>
 <p>Takes a base CSV (e.g. from Folder Preview) and expands each row into
 several rows with distance randomized within a multiplier range of that
 row's own <code>d</code>. Rotation is copied unchanged.</p>
@@ -72,10 +107,9 @@ row's own <code>d</code>. Rotation is copied unchanged.</p>
   </label>
   <button type="submit">Generate Permutations</button>
 </form>
+</section>
 
-<hr style="margin:32px 0;">
-
-<h1>3. Batch Render from CSV</h1>
+<section id="tab-batchRender" class="tabPanel" hidden>
 <p>Point this at a CSV file already on this machine, with a header row of
 <code>filename,d,o,rx,ry,rz</code> (rx/ry/rz optional, default 0). Each
 <code>filename</code> is resolved relative to the CSV's own folder. You'll
@@ -95,13 +129,35 @@ appended columns, <code>left</code> and <code>right</code>.</p>
   </label>
   <button type="submit">Preview Batch</button>
 </form>
+</section>
 
-<hr style="margin:32px 0;">
-
+<section id="tab-rotationViewer" class="tabPanel" hidden>
 <h1>Rotation Viewer</h1>
 <p>Load an STL, drag to rotate it, and read off the exact <code>rx</code>,
 <code>ry</code>, <code>rz</code> values to paste into a CSV row for the
-batch feature above.</p>
-<p><a href="/viewer.html">Open the rotation viewer &rarr;</a></p>
+batch feature above. <a href="/viewer.html" target="_blank">Open in a full page instead &#8599;</a></p>
+<iframe id="viewerFrame" title="Rotation Viewer" style="width:100%; height:850px; border:1px solid #ccc;"></iframe>
+</section>
+
+<script>
+  const tabs = document.querySelectorAll('.tabBtn');
+  const panels = document.querySelectorAll('.tabPanel');
+  const viewerFrame = document.getElementById('viewerFrame');
+
+  function activate(name) {
+    tabs.forEach((t) => t.classList.toggle('active', t.dataset.tab === name));
+    panels.forEach((p) => { p.hidden = p.id !== `tab-${name}`; });
+    if (name === 'rotationViewer' && !viewerFrame.src) {
+      viewerFrame.src = '/viewer.html';
+    }
+    localStorage.setItem('activeTab', name);
+  }
+
+  tabs.forEach((t) => t.addEventListener('click', () => activate(t.dataset.tab)));
+
+  const validTabs = new Set(Array.from(tabs, (t) => t.dataset.tab));
+  const savedTab = localStorage.getItem('activeTab');
+  activate(validTabs.has(savedTab) ? savedTab : 'folderPreview');
+</script>
 </body>
 </html>

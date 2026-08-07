@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head><title>Batch Preview</title></head>
+<body style="font-family:sans-serif; max-width:720px; margin:40px auto;">
+  <h1>Batch Preview</h1>
+  <p>CSV: <code>{{ resolvedCsvPath }}</code></p>
+  <p>Review the planned renders below. Uncheck "Skip this row" to keep a row
+  out of the batch, or click "Adjust rotation&hellip;" to fix a misaligned
+  one in the 3D viewer &mdash; it'll bring you right back here with the
+  updated rx/ry/rz already filled in.</p>
+  <form method="POST" action="/batch">
+    <input type="hidden" name="csvPath" value="{{ resolvedCsvPath }}">
+    {% for row in rows %}
+      {% include "partials/batch_preview_row.njk" %}
+    {% endfor %}
+    <button type="submit">Run Batch</button>
+  </form>
+  <p><a href="/">Back</a></p>
+</body>
+</html>

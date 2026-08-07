@@ -3,6 +3,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const nunjucks = require('nunjucks');
 const { renderStereoPairs, renderPreview, getBoundingRadius, SIZES, DEFAULT_DISTANCE_MULTIPLIER } = require('./renderer');
 const { processBatch, parseCSV, parseNumber, csvLine } = require('./batch');
 
@@ -46,6 +47,11 @@ function effectiveRotation(query, lineNo, row) {
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+nunjucks.configure(path.join(__dirname, 'views'), {
+  autoescape: true,
+  express: app
+});
 
 const uploadsDir = path.join(__dirname, 'uploads');
 fs.mkdirSync(uploadsDir, { recursive: true });
@@ -97,28 +103,13 @@ app.post('/render', (req, res) => {
     }
 
     try {
-      const pairs = renderStereoPairs(req.file.path, d, o, { rx, ry, rz }, SIZES);
+      const pairs = renderStereoPairs(req.file.path, d, o, { rx, ry, rz }, SIZES).map(({ size, image1, image2 }) => ({
+        size,
+        img1: `data:image/png;base64,${image1.toString('base64')}`,
+        img2: `data:image/png;base64,${image2.toString('base64')}`
+      }));
 
-      const sections = pairs.map(({ size, image1, image2 }) => {
-        const img1 = `data:image/png;base64,${image1.toString('base64')}`;
-        const img2 = `data:image/png;base64,${image2.toString('base64')}`;
-        return `
-  <h2>${size}x${size}</h2>
-  <div style="display:flex; gap:20px; margin-bottom:24px;">
-    <div><h3>Camera 1 (left)</h3><img src="${img1}" width="${size}" height="${size}" style="image-rendering:pixelated; border:1px solid #ccc;"></div>
-    <div><h3>Camera 2 (right)</h3><img src="${img2}" width="${size}" height="${size}" style="image-rendering:pixelated; border:1px solid #ccc;"></div>
-  </div>`;
-      }).join('\n');
-
-      res.send(`<!DOCTYPE html>
-<html>
-<head><title>Stereo Render</title></head>
-<body>
-  <h1>Stereo Render (d=${d}, o=${o}, rx=${rx}&deg;, ry=${ry}&deg;, rz=${rz}&deg;)</h1>
-  ${sections}
-  <p><a href="/">Render another</a></p>
-</body>
-</html>`);
+      res.render('render_result.njk', { d, o, rx, ry, rz, pairs });
     } catch (e) {
       console.error(e);
       res.status(500).send('Render error: ' + e.message);
@@ -140,38 +131,33 @@ app.get('/batch/preview', (req, res) => {
     return res.status(400).send(error);
   }
 
-  let rows;
+  let parsedRows;
   try {
-    ({ rows } = parseCSV(fs.readFileSync(resolvedCsvPath, 'utf8')));
+    ({ rows: parsedRows } = parseCSV(fs.readFileSync(resolvedCsvPath, 'utf8')));
   } catch (e) {
     return res.status(400).send('Batch error: ' + e.message);
   }
 
   const csvDir = path.dirname(resolvedCsvPath);
 
-  const rowsHtml = rows.map(({ row }, index) => {
+  const rows = parsedRows.map(({ row }, index) => {
     const lineNo = index + 2;
     const filename = row.filename;
-    const errorRow = (message) => `
-  <div style="border:1px solid #e99; background:#fee; padding:12px; margin-bottom:12px;">
-    <strong>Line ${lineNo}</strong> — ${filename || '(no filename)'}<br>
-    <span style="color:#a00;">${message}</span> — this row will be excluded from the batch.
-  </div>`;
 
-    if (!filename) return errorRow('Missing filename');
+    if (!filename) return { error: 'Missing filename', lineNo, filename: '' };
 
     const stlPath = path.resolve(csvDir, filename);
-    if (!fs.existsSync(stlPath)) return errorRow(`STL not found: ${stlPath}`);
+    if (!fs.existsSync(stlPath)) return { error: `STL not found: ${stlPath}`, lineNo, filename };
 
     const d = parseNumber(row.d, NaN);
     const o = parseNumber(row.o, NaN);
     if (!Number.isFinite(d) || d <= 0 || !Number.isFinite(o) || o < 0) {
-      return errorRow(`Invalid d/o in CSV: d="${row.d}", o="${row.o}"`);
+      return { error: `Invalid d/o in CSV: d="${row.d}", o="${row.o}"`, lineNo, filename };
     }
 
     const { rx, ry, rz } = effectiveRotation(req.query, lineNo, row);
     if (!Number.isFinite(rx) || !Number.isFinite(ry) || !Number.isFinite(rz)) {
-      return errorRow('Invalid rx, ry, or rz');
+      return { error: 'Invalid rx, ry, or rz', lineNo, filename };
     }
 
     // The thumbnail itself is NOT rendered here: with hundreds of rows,
@@ -185,41 +171,10 @@ app.get('/batch/preview', (req, res) => {
 
     const skipped = req.query[`skip_${lineNo}`] === '1';
 
-    return `
-  <div style="display:flex; gap:16px; align-items:flex-start; border:1px solid #ccc; padding:12px; margin-bottom:12px;">
-    <img src="${thumbSrc}" width="${PREVIEW_SIZE}" height="${PREVIEW_SIZE}" loading="lazy" style="image-rendering:pixelated; border:1px solid #999; background:#eee;">
-    <div>
-      <div><strong>Line ${lineNo}</strong> — ${filename}</div>
-      <div>d=${d}, o=${o}</div>
-      <div style="display:flex; gap:10px; margin:8px 0;">
-        <label>rx <input type="number" step="any" name="rx_${lineNo}" value="${rx}" style="width:80px;"></label>
-        <label>ry <input type="number" step="any" name="ry_${lineNo}" value="${ry}" style="width:80px;"></label>
-        <label>rz <input type="number" step="any" name="rz_${lineNo}" value="${rz}" style="width:80px;"></label>
-      </div>
-      <label><input type="checkbox" name="skip_${lineNo}" value="1" ${skipped ? 'checked' : ''}> Skip this row</label>
-      <button type="submit" name="openLineNo" value="${lineNo}" formaction="/batch/preview/open" formmethod="GET" style="display:block; margin-top:8px;">Adjust rotation&hellip;</button>
-    </div>
-  </div>`;
-  }).join('\n');
+    return { error: null, lineNo, filename, d, o, rx, ry, rz, thumbSrc, skipped };
+  });
 
-  res.send(`<!DOCTYPE html>
-<html>
-<head><title>Batch Preview</title></head>
-<body style="font-family:sans-serif; max-width:720px; margin:40px auto;">
-  <h1>Batch Preview</h1>
-  <p>CSV: <code>${resolvedCsvPath}</code></p>
-  <p>Review the planned renders below. Uncheck "Skip this row" to keep a row
-  out of the batch, or click "Adjust rotation&hellip;" to fix a misaligned
-  one in the 3D viewer &mdash; it'll bring you right back here with the
-  updated rx/ry/rz already filled in.</p>
-  <form method="POST" action="/batch">
-    <input type="hidden" name="csvPath" value="${resolvedCsvPath}">
-    ${rowsHtml}
-    <button type="submit">Run Batch</button>
-  </form>
-  <p><a href="/">Back</a></p>
-</body>
-</html>`);
+  res.render('batch_preview.njk', { resolvedCsvPath, rows, previewSize: PREVIEW_SIZE });
 });
 
 // Renders one row's thumbnail on demand — the slow part of the preview
@@ -369,31 +324,7 @@ app.post('/batch', (req, res) => {
 
   try {
     const { outputRoot, results } = processBatch(resolvedCsvPath, { skipLineNos, rotationOverrides });
-
-    const rows = results.map((r) => {
-      if (r.skipped) {
-        return `<tr><td>${r.lineNo}</td><td>${r.filename}</td><td style="color:#888">SKIPPED</td><td>Excluded via batch preview</td></tr>`;
-      }
-      if (r.ok) {
-        return `<tr><td>${r.lineNo}</td><td>${r.filename}</td><td style="color:green">OK</td><td>d=${r.d}, o=${r.o}, rx=${r.rx}&deg;, ry=${r.ry}&deg;, rz=${r.rz}&deg;</td></tr>`;
-      }
-      return `<tr><td>${r.lineNo}</td><td>${r.filename}</td><td style="color:red">FAILED</td><td>${r.error}</td></tr>`;
-    }).join('\n');
-
-    res.send(`<!DOCTYPE html>
-<html>
-<head><title>Batch Render</title></head>
-<body>
-  <h1>Batch Render Complete</h1>
-  <p>Output folder: <code>${outputRoot}</code></p>
-  <p>Subfolders: ${SIZES.map((s) => `${s}x${s}`).join(', ')}</p>
-  <table border="1" cellpadding="6" style="border-collapse:collapse;">
-    <tr><th>Line</th><th>Filename</th><th>Status</th><th>Details</th></tr>
-    ${rows}
-  </table>
-  <p><a href="/">Back</a></p>
-</body>
-</html>`);
+    res.render('batch_result.njk', { outputRoot, sizes: SIZES, results });
   } catch (e) {
     // parseCSV throws for malformed input (missing columns, empty file) -
     // that's a client-side data problem, not a server fault.
@@ -422,7 +353,7 @@ app.get('/folder/preview', (req, res) => {
 
   const o = (req.query.o || '50').trim();
 
-  const rowsHtml = files.map((filename, index) => {
+  const rows = files.map((filename, index) => {
     const idx = index + 1;
     const dVal = req.query[`d_${idx}`] !== undefined ? req.query[`d_${idx}`] : '';
     const rx = req.query[`rx_${idx}`] !== undefined ? req.query[`rx_${idx}`] : '0';
@@ -434,65 +365,14 @@ app.get('/folder/preview', (req, res) => {
       + `&idx=${idx}&o=${encodeURIComponent(o)}&rx=${encodeURIComponent(rx)}&ry=${encodeURIComponent(ry)}&rz=${encodeURIComponent(rz)}`;
     if (dVal !== '') thumbUrl += `&d=${encodeURIComponent(dVal)}`;
 
-    return `
-  <div class="folderRow" data-thumb-base="${thumbUrl}" style="display:flex; gap:16px; align-items:flex-start; border:1px solid #ccc; padding:12px; margin-bottom:12px;">
-    <img class="thumb" width="${PREVIEW_SIZE}" height="${PREVIEW_SIZE}" style="image-rendering:pixelated; border:1px solid #999; background:#eee;">
-    <div>
-      <div><strong>#${idx}</strong> — ${filename}</div>
-      <div style="display:flex; gap:10px; margin:8px 0;">
-        <label>d <input type="number" step="any" class="dInput" name="d_${idx}" value="${dVal}" placeholder="loading&hellip;" style="width:90px;"></label>
-        <label>rx <input type="number" step="any" name="rx_${idx}" value="${rx}" style="width:80px;"></label>
-        <label>ry <input type="number" step="any" name="ry_${idx}" value="${ry}" style="width:80px;"></label>
-        <label>rz <input type="number" step="any" name="rz_${idx}" value="${rz}" style="width:80px;"></label>
-      </div>
-      <label><input type="checkbox" name="skip_${idx}" value="1" ${skipped ? 'checked' : ''}> Skip this file</label>
-      <button type="submit" name="openIdx" value="${idx}" formaction="/folder/preview/open" formmethod="GET" style="display:block; margin-top:8px;">Adjust rotation&hellip;</button>
-    </div>
-  </div>`;
-  }).join('\n');
+    return { idx, filename, dVal, rx, ry, rz, skipped, thumbUrl };
+  });
 
   const defaultOutputCsv = path.join(resolvedFolder, 'base.csv');
 
-  res.send(`<!DOCTYPE html>
-<html>
-<head><title>Folder Preview</title></head>
-<body style="font-family:sans-serif; max-width:720px; margin:40px auto;">
-  <h1>Folder Preview</h1>
-  <p>Folder: <code>${resolvedFolder}</code> (${files.length} STL files)</p>
-  <p>Each file's default distance is auto-computed from its own size once its
-  thumbnail loads (parsing a large STL can take a moment per file). Skip
-  files you don't want, or click "Adjust rotation&hellip;" to align a
-  misaligned one in the 3D viewer &mdash; it brings you right back here.</p>
-  <form method="POST" action="/folder/save">
-    <input type="hidden" name="stlFolder" value="${resolvedFolder}">
-    <label>Baseline o (shared by all rows): <input type="number" step="any" name="o" value="${o}" style="width:90px;"></label>
-    <div style="margin:16px 0;">
-      ${rowsHtml}
-    </div>
-    <label>Save as CSV:<br><input type="text" name="outputCsvPath" value="${defaultOutputCsv}" style="width:100%;"></label>
-    <button type="submit" style="margin-top:12px;">Save as CSV</button>
-  </form>
-  <p><a href="/">Back</a></p>
-  <script>
-    document.querySelectorAll('.folderRow').forEach((row) => {
-      const img = row.querySelector('.thumb');
-      const dInput = row.querySelector('.dInput');
-      const wasEmpty = dInput.value === '';
-      fetch(row.dataset.thumbBase)
-        .then((resp) => {
-          if (!resp.ok) return;
-          if (wasEmpty && dInput.value === '') {
-            const defaultD = resp.headers.get('X-Default-D');
-            if (defaultD) dInput.value = defaultD;
-          }
-          return resp.blob();
-        })
-        .then((blob) => { if (blob) img.src = URL.createObjectURL(blob); })
-        .catch(() => {});
-    });
-  </script>
-</body>
-</html>`);
+  res.render('folder_preview.njk', {
+    resolvedFolder, fileCount: files.length, o, rows, defaultOutputCsv, previewSize: PREVIEW_SIZE
+  });
 });
 
 // Renders one folder-mode row's thumbnail on demand (same reasoning as
@@ -604,18 +484,7 @@ app.post('/folder/save', (req, res) => {
   for (const row of outRows) lines.push(csvLine(row));
   fs.writeFileSync(resolvedOutputCsvPath, lines.join('\n') + '\n');
 
-  res.send(`<!DOCTYPE html>
-<html>
-<head><title>Folder Saved</title></head>
-<body style="font-family:sans-serif; max-width:640px; margin:40px auto;">
-  <h1>Base CSV Saved</h1>
-  <p>Wrote <strong>${outRows.length}</strong> row(s) to <code>${resolvedOutputCsvPath}</code>.</p>
-  ${errors.length ? `<p style="color:#a00;">${errors.length} file(s) excluded:</p><ul>${errors.map((e) => `<li>${e}</li>`).join('')}</ul>` : ''}
-  <p><a href="/permute?csvPath=${encodeURIComponent(resolvedOutputCsvPath)}">Next: Generate Permutations &rarr;</a></p>
-  <p><a href="/batch/preview?csvPath=${encodeURIComponent(resolvedOutputCsvPath)}">Or: Preview this CSV directly &rarr;</a></p>
-  <p><a href="/">Back</a></p>
-</body>
-</html>`);
+  res.render('folder_saved.njk', { outRowsCount: outRows.length, resolvedOutputCsvPath, errors });
 });
 
 // Mode 2 of the pipeline: expands an aligned base CSV into N distance
@@ -631,27 +500,7 @@ app.get('/permute', (req, res) => {
     const base = path.basename(csvPath, path.extname(csvPath));
     outputSuggestion = path.join(dir, `${base}_permuted.csv`);
   }
-  res.send(`<!DOCTYPE html>
-<html>
-<head><title>Generate Permutations</title></head>
-<body style="font-family:sans-serif; max-width:560px; margin:40px auto;">
-  <h1>Generate Permutations</h1>
-  <p>Takes a CSV of aligned STLs (e.g. from Folder Preview) and generates
-  several rows per entry with distance randomized within a multiplier range
-  of that row's own <code>d</code>. Rotation (<code>rx/ry/rz</code>) is
-  copied unchanged &mdash; align rows first via Folder Preview or Batch
-  Preview, not here.</p>
-  <form method="POST" action="/permute">
-    <label>Input CSV path:<br><input type="text" name="csvPath" value="${csvPath}" style="width:100%;" required></label><br><br>
-    <label>Permutations per entry:<br><input type="number" name="permutationsPerEntry" value="3" min="1" step="1" required></label><br><br>
-    <label>Distance multiplier min:<br><input type="number" name="distanceMultiplierMin" value="0.6" min="0.01" step="any" required></label><br><br>
-    <label>Distance multiplier max:<br><input type="number" name="distanceMultiplierMax" value="1.5" min="0.01" step="any" required></label><br><br>
-    <label>Output CSV path:<br><input type="text" name="outputCsvPath" value="${outputSuggestion}" style="width:100%;" required></label><br><br>
-    <button type="submit">Generate</button>
-  </form>
-  <p><a href="/">Back</a></p>
-</body>
-</html>`);
+  res.render('permute_form.njk', { csvPath, outputSuggestion });
 });
 
 app.post('/permute', (req, res) => {
@@ -706,18 +555,7 @@ app.post('/permute', (req, res) => {
   for (const r of outRows) lines.push(csvLine(r));
   fs.writeFileSync(resolvedOutputCsvPath, lines.join('\n') + '\n');
 
-  res.send(`<!DOCTYPE html>
-<html>
-<head><title>Permutations Generated</title></head>
-<body style="font-family:sans-serif; max-width:640px; margin:40px auto;">
-  <h1>Permutations Generated</h1>
-  <p>Wrote <strong>${outRows.length}</strong> row(s) (${n} per entry, d in
-  [${min}x, ${max}x] of each source row's own d) to <code>${resolvedOutputCsvPath}</code>.</p>
-  ${errors.length ? `<p style="color:#a00;">${errors.length} source row(s) skipped:</p><ul>${errors.map((e) => `<li>${e}</li>`).join('')}</ul>` : ''}
-  <p><a href="/batch/preview?csvPath=${encodeURIComponent(resolvedOutputCsvPath)}">Review the generated CSV &rarr;</a></p>
-  <p><a href="/">Back</a></p>
-</body>
-</html>`);
+  res.render('permute_result.njk', { outRowsCount: outRows.length, n, min, max, resolvedOutputCsvPath, errors });
 });
 
 app.listen(PORT, () => {
