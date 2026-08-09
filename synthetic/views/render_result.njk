@@ -3,6 +3,13 @@
 <head><title>Stereo Render</title></head>
 <body>
   <h1>Stereo Render (d={{ d }}, o={{ o }}, rx={{ rx }}&deg;, ry={{ ry }}&deg;, rz={{ rz }}&deg;)</h1>
+  {% if exportedPaths %}
+  <div style="background:#eef; border:1px solid #99c; padding:10px; margin-bottom:16px;">
+    Saved to disk:<br>
+    <code>{{ exportedPaths.leftPath }}</code><br>
+    <code>{{ exportedPaths.rightPath }}</code>
+  </div>
+  {% endif %}
   {% for pair in pairs %}
   <h2>{{ pair.size }}x{{ pair.size }}</h2>
   <div style="display:flex; gap:20px; margin-bottom:24px;">

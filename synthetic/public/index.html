@@ -3,10 +3,28 @@
 <head>
 <meta charset="utf-8">
 <title>STL Stereo Camera Renderer</title>
+<script type="importmap">
+{
+  "imports": {
+    "three": "/three-lib/build/three.module.js"
+  }
+}
+</script>
 <style>
   body { font-family: sans-serif; max-width: 720px; margin: 40px auto; }
   label { display: block; margin-bottom: 12px; }
   input[type="number"] { width: 100px; }
+
+  #rendererCanvas { border: 1px solid #ccc; display: block; touch-action: none; cursor: grab; margin: 10px 0; }
+  #rendererCanvas:active { cursor: grabbing; }
+  .row3 { display: flex; gap: 16px; margin: 10px 0 20px; }
+  .row3 label { flex: 1; margin-bottom: 0; }
+  .row3 input[type="number"] { width: 100%; box-sizing: border-box; }
+
+  .exportFields {
+    display: flex; flex-direction: column; gap: 6px; border: 1px solid #ccc; border-radius: 6px;
+    padding: 10px; margin: 8px 0 16px; background: #fafafa;
+  }
 
   .pageHeader { display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; flex-wrap: wrap; }
 
@@ -51,10 +69,10 @@
 <p>Upload an STL file and get two images of it, rendered from two cameras
 that are both distance <strong>d</strong> from the object and
 <strong>o</strong> apart from each other (like a stereo camera pair).</p>
-<form action="/render" method="POST" enctype="multipart/form-data">
+<form action="/render" method="POST" enctype="multipart/form-data" id="rendererForm">
   <label>
     STL file:<br>
-    <input type="file" name="stl" accept=".stl" required>
+    <input type="file" name="stl" id="rendererStlFile" accept=".stl" required>
   </label>
   <label>
     Distance d (camera to object):<br>
@@ -64,19 +82,37 @@ that are both distance <strong>d</strong> from the object and
     Opening o (distance between the two cameras):<br>
     <input type="number" name="o" step="any" min="0" value="50" required>
   </label>
-  <p>Object rotation, applied in order pitch &rarr; yaw &rarr; roll (degrees):</p>
-  <label>
-    rx (pitch, around X axis):<br>
-    <input type="number" name="rx" step="any" value="0">
-  </label>
-  <label>
-    ry (yaw, around Y axis):<br>
-    <input type="number" name="ry" step="any" value="0">
-  </label>
-  <label>
-    rz (roll, around Z axis):<br>
-    <input type="number" name="rz" step="any" value="0">
-  </label>
+  <p>Object rotation, applied in order pitch &rarr; yaw &rarr; roll (degrees).
+  Once an STL is loaded, drag the preview to set pitch (rx) / yaw (ry); roll
+  (rz) is number-only, same convention as the Rotation Viewer.</p>
+  <canvas id="rendererCanvas" width="360" height="360"></canvas>
+  <div class="row3">
+    <label>rx (pitch, around X axis)<br><input type="number" name="rx" id="rendererRx" step="any" value="0"></label>
+    <label>ry (yaw, around Y axis)<br><input type="number" name="ry" id="rendererRy" step="any" value="0"></label>
+    <label>rz (roll, around Z axis)<br><input type="number" name="rz" id="rendererRz" step="any" value="0"></label>
+    <label style="flex:0 0 auto; align-self:flex-end;"><button type="button" id="rendererResetRotation">Reset</button></label>
+  </div>
+
+  <label><input type="checkbox" id="doExportCheckbox" name="doExport" value="1" style="display:inline; width:auto;"> Also save this pair to disk</label>
+  <div id="exportFields" class="exportFields" hidden>
+    <label>
+      Output name (no extension; saved as <code>&lt;name&gt;_left.png</code> / <code>&lt;name&gt;_right.png</code>):<br>
+      <input type="text" name="exportName" id="exportName" placeholder="e.g. bench_d200" style="width:100%; box-sizing:border-box;">
+    </label>
+    <label>
+      Resolution to export:<br>
+      <select name="exportSize" id="exportSize">
+        <option value="64">64x64</option>
+        <option value="128">128x128</option>
+        <option value="256" selected>256x256</option>
+      </select>
+    </label>
+    <label>
+      Output folder:<br>
+      <input type="text" name="exportFolder" id="exportFolder" placeholder="/path/to/output/folder" style="width:100%; box-sizing:border-box;">
+    </label>
+  </div>
+
   <button type="submit">Render</button>
 </form>
 </section>
@@ -138,6 +174,177 @@ appended columns, <code>left</code> and <code>right</code>.</p>
 batch feature above. <a href="/viewer.html" target="_blank">Open in a full page instead &#8599;</a></p>
 <iframe id="viewerFrame" title="Rotation Viewer" style="width:100%; height:850px; border:1px solid #ccc;"></iframe>
 </section>
+
+<script>
+  const doExportCheckbox = document.getElementById('doExportCheckbox');
+  const exportFields = document.getElementById('exportFields');
+  const exportNameField = document.getElementById('exportName');
+  const exportFolderField = document.getElementById('exportFolder');
+
+  function syncExportFields() {
+    const on = doExportCheckbox.checked;
+    exportFields.hidden = !on;
+    exportNameField.required = on;
+    exportFolderField.required = on;
+  }
+  doExportCheckbox.addEventListener('change', syncExportFields);
+  syncExportFields();
+</script>
+
+<script type="module">
+  // Embedded rotation preview for the renderer tab: same three.js drag-to-rotate
+  // approach as viewer.html, but wired directly to this form's own rx/ry/rz
+  // fields instead of round-tripping through a separate page, since the STL
+  // here is a pending upload with no server-side path yet to hand off.
+  import * as THREE from 'three';
+  import { STLLoader } from '/three-lib/examples/jsm/loaders/STLLoader.js';
+
+  const canvas = document.getElementById('rendererCanvas');
+  const width = canvas.width;
+  const height = canvas.height;
+
+  const renderer3d = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer3d.setSize(width, height, false);
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color(0xffffff);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const key = new THREE.DirectionalLight(0xffffff, 0.8);
+  key.position.set(1, 1, 1);
+  scene.add(key);
+  const fill = new THREE.DirectionalLight(0xffffff, 0.4);
+  fill.position.set(-1, -0.5, -1);
+  scene.add(fill);
+
+  const camera = new THREE.PerspectiveCamera(45, width / height, 0.01, 1);
+  let mesh = null;
+
+  const rxInput = document.getElementById('rendererRx');
+  const ryInput = document.getElementById('rendererRy');
+  const rzInput = document.getElementById('rendererRz');
+
+  const state = { rx: 0, ry: 0, rz: 0 };
+
+  // Matches renderer.js's rotatePoint exactly: pitch (X), then yaw (Y), then
+  // roll (Z), i.e. the composite matrix Mz * My * Mx applied to each point.
+  function applyRotation() {
+    if (!mesh) return;
+    const mx = new THREE.Matrix4().makeRotationX(THREE.MathUtils.degToRad(state.rx));
+    const my = new THREE.Matrix4().makeRotationY(THREE.MathUtils.degToRad(state.ry));
+    const mz = new THREE.Matrix4().makeRotationZ(THREE.MathUtils.degToRad(state.rz));
+    const m = new THREE.Matrix4().multiplyMatrices(mz, my).multiply(mx);
+    mesh.matrix.copy(m);
+  }
+
+  function normalizeDeg(deg) {
+    let d = deg % 360;
+    if (d > 180) d -= 360;
+    if (d <= -180) d += 360;
+    return d;
+  }
+
+  function syncInputsFromState() {
+    rxInput.value = normalizeDeg(state.rx).toFixed(2);
+    ryInput.value = normalizeDeg(state.ry).toFixed(2);
+    rzInput.value = normalizeDeg(state.rz).toFixed(2);
+  }
+
+  function render() {
+    applyRotation();
+    renderer3d.render(scene, camera);
+  }
+
+  function loadGeometry(geometry) {
+    geometry.computeBoundingBox();
+    const center = new THREE.Vector3();
+    geometry.boundingBox.getCenter(center);
+    geometry.translate(-center.x, -center.y, -center.z);
+    geometry.computeBoundingSphere();
+    geometry.computeVertexNormals();
+
+    const radius = Math.max(geometry.boundingSphere.radius, 1e-6);
+
+    if (mesh) scene.remove(mesh);
+    const material = new THREE.MeshPhongMaterial({ color: 0x2266cc, specular: 0x111111, shininess: 40 });
+    mesh = new THREE.Mesh(geometry, material);
+    mesh.matrixAutoUpdate = false;
+    scene.add(mesh);
+
+    const dist = radius * 2.8;
+    camera.near = Math.max(dist - radius * 2, 0.01);
+    camera.far = dist + radius * 4;
+    camera.position.set(0, 0, dist);
+    camera.lookAt(0, 0, 0);
+    camera.updateProjectionMatrix();
+
+    // Keep whatever rotation is already in the form fields (e.g. re-picking
+    // a file after having already dialed in rx/ry/rz).
+    state.rx = parseFloat(rxInput.value) || 0;
+    state.ry = parseFloat(ryInput.value) || 0;
+    state.rz = parseFloat(rzInput.value) || 0;
+    render();
+  }
+
+  document.getElementById('rendererStlFile').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // Default the export name from the STL's own filename, without
+    // clobbering a name the user already typed.
+    if (exportNameField && !exportNameField.value) {
+      exportNameField.value = file.name.replace(/\.stl$/i, '');
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      const loader = new STLLoader();
+      const geometry = loader.parse(reader.result);
+      loadGeometry(geometry);
+    };
+    reader.readAsArrayBuffer(file);
+  });
+
+  const SENSITIVITY = 0.4;
+  let dragging = false;
+  let lastX = 0, lastY = 0;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!mesh) return;
+    dragging = true;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!dragging) return;
+    const dx = e.clientX - lastX;
+    const dy = e.clientY - lastY;
+    lastX = e.clientX;
+    lastY = e.clientY;
+    state.ry += dx * SENSITIVITY;
+    state.rx += dy * SENSITIVITY;
+    syncInputsFromState();
+    render();
+  });
+  canvas.addEventListener('pointerup', (e) => {
+    dragging = false;
+    canvas.releasePointerCapture(e.pointerId);
+  });
+
+  for (const [input, axis] of [[rxInput, 'rx'], [ryInput, 'ry'], [rzInput, 'rz']]) {
+    input.addEventListener('input', () => {
+      const v = parseFloat(input.value);
+      state[axis] = Number.isFinite(v) ? v : 0;
+      render();
+    });
+  }
+
+  document.getElementById('rendererResetRotation').addEventListener('click', () => {
+    state.rx = 0; state.ry = 0; state.rz = 0;
+    syncInputsFromState();
+    render();
+  });
+</script>
 
 <script>
   const tabs = document.querySelectorAll('.tabBtn');

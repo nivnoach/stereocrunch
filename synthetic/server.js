@@ -102,14 +102,54 @@ app.post('/render', (req, res) => {
       return res.status(400).send('Invalid rx, ry, or rz: must be numbers (degrees)');
     }
 
+    // Optionally save one resolution of this render to disk under a
+    // hand-picked name, for building a dataset one STL at a time instead of
+    // through the CSV/batch pipeline.
+    const doExport = req.body.doExport === '1';
+    let exportName = '';
+    let exportSize = null;
+    let resolvedExportFolder = '';
+    if (doExport) {
+      exportName = (req.body.exportName || '').trim();
+      const exportFolder = (req.body.exportFolder || '').trim();
+      exportSize = parseInt(req.body.exportSize, 10);
+
+      if (!exportName || /[\\/]/.test(exportName) || exportName === '.' || exportName === '..') {
+        cleanup();
+        return res.status(400).send('Invalid export name: required, and must not contain "/" or "\\"');
+      }
+      if (!exportFolder) {
+        cleanup();
+        return res.status(400).send('exportFolder is required when exporting');
+      }
+      if (!SIZES.includes(exportSize)) {
+        cleanup();
+        return res.status(400).send(`Invalid exportSize: must be one of ${SIZES.join(', ')}`);
+      }
+      resolvedExportFolder = path.resolve(exportFolder);
+    }
+
     try {
-      const pairs = renderStereoPairs(req.file.path, d, o, { rx, ry, rz }, SIZES).map(({ size, image1, image2 }) => ({
+      const rendered = renderStereoPairs(req.file.path, d, o, { rx, ry, rz }, SIZES);
+
+      let exportedPaths = null;
+      if (doExport) {
+        const match = rendered.find((p) => p.size === exportSize);
+        fs.mkdirSync(resolvedExportFolder, { recursive: true });
+        const leftPath = path.join(resolvedExportFolder, `${exportName}_left.png`);
+        const rightPath = path.join(resolvedExportFolder, `${exportName}_right.png`);
+        fs.writeFileSync(leftPath, match.image1);
+        fs.writeFileSync(rightPath, match.image2);
+        exportedPaths = { leftPath, rightPath };
+      }
+
+      const pairs = rendered.map(({ size, image1, image2 }) => ({
         size,
         img1: `data:image/png;base64,${image1.toString('base64')}`,
         img2: `data:image/png;base64,${image2.toString('base64')}`
       }));
 
-      res.render('render_result.njk', { d, o, rx, ry, rz, pairs });
+      res.render('render_result.njk', { d, o, rx, ry, rz, pairs, exportedPaths });
     } catch (e) {
       console.error(e);
       res.status(500).send('Render error: ' + e.message);
