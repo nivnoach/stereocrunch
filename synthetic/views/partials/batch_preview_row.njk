@@ -1,18 +1,18 @@
 {% if row.error %}
-  <div style="border:1px solid #e99; background:#fee; padding:12px; margin-bottom:12px;">
+  <div class="batchRowWrapper" style="border:1px solid #e99; background:#fee; padding:12px; margin-bottom:12px;">
     <strong>Line {{ row.lineNo }}</strong> — {{ row.filename or '(no filename)' }}<br>
     <span style="color:#a00;">{{ row.error }}</span> — this row will be excluded from the batch.
   </div>
 {% else %}
-  <div style="display:flex; gap:16px; align-items:flex-start; border:1px solid #ccc; padding:12px; margin-bottom:12px;">
-    <img src="{{ row.thumbSrc }}" width="{{ previewSize }}" height="{{ previewSize }}" loading="lazy" style="image-rendering:pixelated; border:1px solid #999; background:#eee;">
+  <div class="batchRowWrapper batchRow" style="display:flex; gap:16px; align-items:flex-start; border:1px solid #ccc; padding:12px; margin-bottom:12px;">
+    <img class="thumb" src="{{ row.thumbSrc }}" width="{{ previewSize }}" height="{{ previewSize }}" loading="lazy" style="image-rendering:pixelated; border:1px solid #999; background:#eee;">
     <div>
       <div><strong>Line {{ row.lineNo }}</strong> — {{ row.filename }}</div>
       <div>d={{ row.d }}, o={{ row.o }}</div>
       <div style="display:flex; gap:10px; margin:8px 0;">
-        <label>rx <input type="number" step="any" name="rx_{{ row.lineNo }}" value="{{ row.rx }}" style="width:80px;"></label>
-        <label>ry <input type="number" step="any" name="ry_{{ row.lineNo }}" value="{{ row.ry }}" style="width:80px;"></label>
-        <label>rz <input type="number" step="any" name="rz_{{ row.lineNo }}" value="{{ row.rz }}" style="width:80px;"></label>
+        <label>rx <input type="number" step="any" class="rxInput" name="rx_{{ row.lineNo }}" value="{{ row.rx }}" style="width:80px;"></label>
+        <label>ry <input type="number" step="any" class="ryInput" name="ry_{{ row.lineNo }}" value="{{ row.ry }}" style="width:80px;"></label>
+        <label>rz <input type="number" step="any" class="rzInput" name="rz_{{ row.lineNo }}" value="{{ row.rz }}" style="width:80px;"></label>
       </div>
       <label><input type="checkbox" name="skip_{{ row.lineNo }}" value="1" {% if row.skipped %}checked{% endif %}> Skip this row</label>
       <button type="submit" name="openLineNo" value="{{ row.lineNo }}" formaction="/batch/preview/open" formmethod="GET" style="display:block; margin-top:8px;">Adjust rotation&hellip;</button>

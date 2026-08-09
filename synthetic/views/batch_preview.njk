@@ -4,17 +4,128 @@
 <body style="font-family:sans-serif; max-width:720px; margin:40px auto;">
   <h1>Batch Preview</h1>
   <p>CSV: <code>{{ resolvedCsvPath }}</code></p>
-  <p>Review the planned renders below. Uncheck "Skip this row" to keep a row
-  out of the batch, or click "Adjust rotation&hellip;" to fix a misaligned
-  one in the 3D viewer &mdash; it'll bring you right back here with the
-  updated rx/ry/rz already filled in.</p>
+  <p>Review the planned renders below. Drag a thumbnail directly to adjust
+  its pitch/yaw, uncheck "Skip this row" to keep a row out of the batch, or
+  click "Adjust rotation&hellip;" to fix a misaligned one in the full 3D
+  viewer &mdash; it'll bring you right back here with the updated rx/ry/rz
+  already filled in.</p>
   <form method="POST" action="/batch">
     <input type="hidden" name="csvPath" value="{{ resolvedCsvPath }}">
-    {% for row in rows %}
-      {% include "partials/batch_preview_row.njk" %}
-    {% endfor %}
+    <div class="pager" style="display:flex; align-items:center; gap:8px; margin:16px 0;">
+      <button type="button" class="pagerPrev">&larr; Prev</button>
+      <span>Page <input type="number" class="pagerPageInput" min="1" style="width:60px;"> of <span class="pagerTotal"></span></span>
+      <button type="button" class="pagerNext">Next &rarr;</button>
+    </div>
+    <div id="rowsContainer">
+      {% for row in rows %}
+        {% include "partials/batch_preview_row.njk" %}
+      {% endfor %}
+    </div>
+    <div class="pager" style="display:flex; align-items:center; gap:8px; margin:16px 0;">
+      <button type="button" class="pagerPrev">&larr; Prev</button>
+      <span>Page <input type="number" class="pagerPageInput" min="1" style="width:60px;"> of <span class="pagerTotal"></span></span>
+      <button type="button" class="pagerNext">Next &rarr;</button>
+    </div>
     <button type="submit">Run Batch</button>
   </form>
   <p><a href="/">Back</a></p>
+  <script>
+    const DRAG_SENSITIVITY = 0.4;
+    const PAGE_SIZE = 50;
+
+    document.querySelectorAll('.batchRow').forEach((row) => {
+      const img = row.querySelector('.thumb');
+      const rxInput = row.querySelector('.rxInput');
+      const ryInput = row.querySelector('.ryInput');
+      const rzInput = row.querySelector('.rzInput');
+
+      function refreshThumb() {
+        const url = new URL(img.src, window.location.origin);
+        url.searchParams.set('rx', rxInput.value || '0');
+        url.searchParams.set('ry', ryInput.value || '0');
+        url.searchParams.set('rz', rzInput.value || '0');
+        img.src = url.pathname + url.search;
+      }
+
+      // Same drag-to-rotate interaction as the folder preview: nudges
+      // rx/ry and asks the server for a fresh render, debounced during the
+      // drag and finalized on release.
+      img.style.cursor = 'grab';
+      img.style.touchAction = 'none';
+      let dragging = false;
+      let lastX = 0, lastY = 0;
+      let refreshTimer = null;
+
+      img.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        img.setPointerCapture(e.pointerId);
+        img.style.cursor = 'grabbing';
+      });
+      img.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        ryInput.value = ((parseFloat(ryInput.value) || 0) + dx * DRAG_SENSITIVITY).toFixed(2);
+        rxInput.value = ((parseFloat(rxInput.value) || 0) + dy * DRAG_SENSITIVITY).toFixed(2);
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(refreshThumb, 120);
+      });
+      img.addEventListener('pointerup', (e) => {
+        if (!dragging) return;
+        dragging = false;
+        img.style.cursor = 'grab';
+        img.releasePointerCapture(e.pointerId);
+        clearTimeout(refreshTimer);
+        refreshThumb();
+      });
+
+      // Typing directly into rx/ry/rz should update the thumbnail too, not
+      // just dragging — debounced the same way so fast keystrokes don't
+      // each trigger their own server render.
+      [rxInput, ryInput, rzInput].forEach((input) => {
+        input.addEventListener('input', () => {
+          clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(refreshThumb, 200);
+        });
+      });
+    });
+
+    // Rows stay in the DOM (and keep posting with the form) regardless of
+    // pagination; only their visibility toggles. Thumbnails are plain
+    // <img loading="lazy"> tags, so hiding a row's page via display:none
+    // keeps the browser from fetching it until that page is shown.
+    const pageRows = Array.from(document.querySelectorAll('.batchRowWrapper'));
+    const totalPages = Math.max(1, Math.ceil(pageRows.length / PAGE_SIZE));
+    let currentPage = 1;
+
+    const pagerPrevBtns = document.querySelectorAll('.pagerPrev');
+    const pagerNextBtns = document.querySelectorAll('.pagerNext');
+    const pagerPageInputs = document.querySelectorAll('.pagerPageInput');
+    const pagerTotalEls = document.querySelectorAll('.pagerTotal');
+
+    function showPage(page) {
+      currentPage = Math.min(Math.max(1, page), totalPages);
+      pageRows.forEach((row, i) => {
+        row.style.display = Math.floor(i / PAGE_SIZE) + 1 === currentPage ? '' : 'none';
+      });
+      pagerPageInputs.forEach((el) => { el.value = currentPage; });
+      pagerTotalEls.forEach((el) => { el.textContent = totalPages; });
+      pagerPrevBtns.forEach((el) => { el.disabled = currentPage <= 1; });
+      pagerNextBtns.forEach((el) => { el.disabled = currentPage >= totalPages; });
+    }
+
+    pagerPrevBtns.forEach((el) => el.addEventListener('click', () => showPage(currentPage - 1)));
+    pagerNextBtns.forEach((el) => el.addEventListener('click', () => showPage(currentPage + 1)));
+    pagerPageInputs.forEach((el) => el.addEventListener('change', () => showPage(parseInt(el.value, 10) || 1)));
+
+    if (totalPages <= 1) {
+      document.querySelectorAll('.pager').forEach((el) => { el.style.display = 'none'; });
+    }
+    showPage(1);
+  </script>
 </body>
 </html>

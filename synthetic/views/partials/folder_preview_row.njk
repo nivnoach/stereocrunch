@@ -4,11 +4,11 @@
     <div><strong>#{{ row.idx }}</strong> — {{ row.filename }}</div>
     <div style="display:flex; gap:10px; margin:8px 0;">
       <label>d <input type="number" step="any" class="dInput" name="d_{{ row.idx }}" value="{{ row.dVal }}" placeholder="loading&hellip;" style="width:90px;"></label>
-      <label>rx <input type="number" step="any" name="rx_{{ row.idx }}" value="{{ row.rx }}" style="width:80px;"></label>
-      <label>ry <input type="number" step="any" name="ry_{{ row.idx }}" value="{{ row.ry }}" style="width:80px;"></label>
-      <label>rz <input type="number" step="any" name="rz_{{ row.idx }}" value="{{ row.rz }}" style="width:80px;"></label>
+      <label>rx <input type="number" step="any" class="rxInput" name="rx_{{ row.idx }}" value="{{ row.rx }}" style="width:80px;"></label>
+      <label>ry <input type="number" step="any" class="ryInput" name="ry_{{ row.idx }}" value="{{ row.ry }}" style="width:80px;"></label>
+      <label>rz <input type="number" step="any" class="rzInput" name="rz_{{ row.idx }}" value="{{ row.rz }}" style="width:80px;"></label>
     </div>
-    <label><input type="checkbox" name="skip_{{ row.idx }}" value="1" {% if row.skipped %}checked{% endif %}> Skip this file</label>
+    <label><input type="checkbox" name="skip_{{ row.idx }}" value="1" {% if row.skipped %}checked{% endif %}> Do not save (exclude from CSV)</label>
     <button type="submit" name="openIdx" value="{{ row.idx }}" formaction="/folder/preview/open" formmethod="GET" style="display:block; margin-top:8px;">Adjust rotation&hellip;</button>
   </div>
 </div>

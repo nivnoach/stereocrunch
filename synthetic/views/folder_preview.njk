@@ -4,39 +4,172 @@
 <body style="font-family:sans-serif; max-width:720px; margin:40px auto;">
   <h1>Folder Preview</h1>
   <p>Folder: <code>{{ resolvedFolder }}</code> ({{ fileCount }} STL files)</p>
+  {% if baseCsvLoaded %}
+    <p style="color:#1a7a1a;">Loaded existing values from <code>{{ defaultOutputCsv }}</code> — files already in
+    that CSV start from their saved d/o/rx/ry/rz instead of the defaults.</p>
+  {% endif %}
   <p>Each file's default distance is auto-computed from its own size once its
-  thumbnail loads (parsing a large STL can take a moment per file). Skip
-  files you don't want, or click "Adjust rotation&hellip;" to align a
-  misaligned one in the 3D viewer &mdash; it brings you right back here.</p>
+  thumbnail loads (parsing a large STL can take a moment per file). Drag a
+  thumbnail directly to adjust its pitch/yaw, or click "Adjust
+  rotation&hellip;" to align a misaligned one in the full 3D viewer &mdash;
+  it brings you right back here. Mark files you don't want as "Do not save"
+  to leave them out of the CSV.</p>
   <form method="POST" action="/folder/save">
     <input type="hidden" name="stlFolder" value="{{ resolvedFolder }}">
     <label>Baseline o (shared by all rows): <input type="number" step="any" name="o" value="{{ o }}" style="width:90px;"></label>
-    <div style="margin:16px 0;">
+    <div class="pager" style="display:flex; align-items:center; gap:8px; margin:16px 0;">
+      <button type="button" class="pagerPrev">&larr; Prev</button>
+      <span>Page <input type="number" class="pagerPageInput" min="1" style="width:60px;"> of <span class="pagerTotal"></span></span>
+      <button type="button" class="pagerNext">Next &rarr;</button>
+    </div>
+    <div id="rowsContainer" style="margin:16px 0;">
       {% for row in rows %}
         {% include "partials/folder_preview_row.njk" %}
       {% endfor %}
+    </div>
+    <div class="pager" style="display:flex; align-items:center; gap:8px; margin:16px 0;">
+      <button type="button" class="pagerPrev">&larr; Prev</button>
+      <span>Page <input type="number" class="pagerPageInput" min="1" style="width:60px;"> of <span class="pagerTotal"></span></span>
+      <button type="button" class="pagerNext">Next &rarr;</button>
     </div>
     <label>Save as CSV:<br><input type="text" name="outputCsvPath" value="{{ defaultOutputCsv }}" style="width:100%;"></label>
     <button type="submit" style="margin-top:12px;">Save as CSV</button>
   </form>
   <p><a href="/">Back</a></p>
   <script>
-    document.querySelectorAll('.folderRow').forEach((row) => {
+    const DRAG_SENSITIVITY = 0.4;
+    const PAGE_SIZE = 50;
+
+    function buildThumbUrl(row, dInput, rxInput, ryInput, rzInput) {
+      const url = new URL(row.dataset.thumbBase, window.location.origin);
+      url.searchParams.set('rx', rxInput.value || '0');
+      url.searchParams.set('ry', ryInput.value || '0');
+      url.searchParams.set('rz', rzInput.value || '0');
+      if (dInput.value !== '') url.searchParams.set('d', dInput.value);
+      return url.pathname + url.search;
+    }
+
+    // Every row's fields stay in the DOM (and so still post with the form)
+    // regardless of pagination — only the expensive part, the server-side
+    // STL render behind each thumbnail, is deferred until a row's page is
+    // actually shown. That's what keeps the page light with large folders.
+    const rowControllers = Array.from(document.querySelectorAll('.folderRow')).map((row) => {
       const img = row.querySelector('.thumb');
       const dInput = row.querySelector('.dInput');
-      const wasEmpty = dInput.value === '';
-      fetch(row.dataset.thumbBase)
-        .then((resp) => {
-          if (!resp.ok) return;
-          if (wasEmpty && dInput.value === '') {
-            const defaultD = resp.headers.get('X-Default-D');
-            if (defaultD) dInput.value = defaultD;
-          }
-          return resp.blob();
-        })
-        .then((blob) => { if (blob) img.src = URL.createObjectURL(blob); })
-        .catch(() => {});
+      const rxInput = row.querySelector('.rxInput');
+      const ryInput = row.querySelector('.ryInput');
+      const rzInput = row.querySelector('.rzInput');
+      let currentObjectUrl = null;
+      let loaded = false;
+
+      function refreshThumb(applyDefaultD) {
+        const wasEmpty = applyDefaultD && dInput.value === '';
+        fetch(buildThumbUrl(row, dInput, rxInput, ryInput, rzInput))
+          .then((resp) => {
+            if (!resp.ok) return;
+            if (wasEmpty && dInput.value === '') {
+              const defaultD = resp.headers.get('X-Default-D');
+              if (defaultD) dInput.value = defaultD;
+            }
+            return resp.blob();
+          })
+          .then((blob) => {
+            if (!blob) return;
+            const nextUrl = URL.createObjectURL(blob);
+            img.src = nextUrl;
+            if (currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+            currentObjectUrl = nextUrl;
+          })
+          .catch(() => {});
+      }
+
+      function ensureLoaded() {
+        if (loaded) return;
+        loaded = true;
+        refreshThumb(true);
+      }
+
+      // Drag directly on the thumbnail to rotate the object (pitch/yaw),
+      // instead of always having to hop over to the "Adjust rotation..." 3D
+      // viewer just to nudge an angle. Re-renders are debounced during the
+      // drag itself and finalized on release, since each one is a real STL
+      // render on the server.
+      img.style.cursor = 'grab';
+      img.style.touchAction = 'none';
+      let dragging = false;
+      let lastX = 0, lastY = 0;
+      let refreshTimer = null;
+
+      img.addEventListener('pointerdown', (e) => {
+        dragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        img.setPointerCapture(e.pointerId);
+        img.style.cursor = 'grabbing';
+      });
+      img.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const dx = e.clientX - lastX;
+        const dy = e.clientY - lastY;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        ryInput.value = ((parseFloat(ryInput.value) || 0) + dx * DRAG_SENSITIVITY).toFixed(2);
+        rxInput.value = ((parseFloat(rxInput.value) || 0) + dy * DRAG_SENSITIVITY).toFixed(2);
+        clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(() => refreshThumb(false), 120);
+      });
+      img.addEventListener('pointerup', (e) => {
+        if (!dragging) return;
+        dragging = false;
+        img.style.cursor = 'grab';
+        img.releasePointerCapture(e.pointerId);
+        clearTimeout(refreshTimer);
+        refreshThumb(false);
+      });
+
+      // Typing directly into rx/ry/rz should update the thumbnail too, not
+      // just dragging — debounced the same way so fast keystrokes don't
+      // each trigger their own server render.
+      [rxInput, ryInput, rzInput].forEach((input) => {
+        input.addEventListener('input', () => {
+          loaded = true;
+          clearTimeout(refreshTimer);
+          refreshTimer = setTimeout(() => refreshThumb(false), 200);
+        });
+      });
+
+      return { row, ensureLoaded };
     });
+
+    const totalPages = Math.max(1, Math.ceil(rowControllers.length / PAGE_SIZE));
+    let currentPage = 1;
+
+    const pagerPrevBtns = document.querySelectorAll('.pagerPrev');
+    const pagerNextBtns = document.querySelectorAll('.pagerNext');
+    const pagerPageInputs = document.querySelectorAll('.pagerPageInput');
+    const pagerTotalEls = document.querySelectorAll('.pagerTotal');
+
+    function showPage(page) {
+      currentPage = Math.min(Math.max(1, page), totalPages);
+      rowControllers.forEach((ctrl, i) => {
+        const onPage = Math.floor(i / PAGE_SIZE) + 1 === currentPage;
+        ctrl.row.style.display = onPage ? '' : 'none';
+        if (onPage) ctrl.ensureLoaded();
+      });
+      pagerPageInputs.forEach((el) => { el.value = currentPage; });
+      pagerTotalEls.forEach((el) => { el.textContent = totalPages; });
+      pagerPrevBtns.forEach((el) => { el.disabled = currentPage <= 1; });
+      pagerNextBtns.forEach((el) => { el.disabled = currentPage >= totalPages; });
+    }
+
+    pagerPrevBtns.forEach((el) => el.addEventListener('click', () => showPage(currentPage - 1)));
+    pagerNextBtns.forEach((el) => el.addEventListener('click', () => showPage(currentPage + 1)));
+    pagerPageInputs.forEach((el) => el.addEventListener('change', () => showPage(parseInt(el.value, 10) || 1)));
+
+    if (totalPages <= 1) {
+      document.querySelectorAll('.pager').forEach((el) => { el.style.display = 'none'; });
+    }
+    showPage(1);
   </script>
 </body>
 </html>

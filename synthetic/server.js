@@ -73,7 +73,11 @@ const upload = multer({
 });
 
 app.use(express.static(path.join(__dirname, 'public')));
-app.use(express.urlencoded({ extended: false }));
+// Defaults are a 100kb body and a 1000-parameter cap, either of which a
+// folder/batch preview form blows past once it has more than a couple
+// hundred rows (each posting its own d_/rx_/ry_/rz_/skip_ fields on
+// "Save as CSV" / "Run Batch").
+app.use(express.urlencoded({ extended: false, limit: '50mb', parameterLimit: 1000000 }));
 app.use('/three-lib', express.static(path.join(__dirname, 'node_modules', 'three')));
 
 app.post('/render', (req, res) => {
@@ -391,14 +395,44 @@ app.get('/folder/preview', (req, res) => {
     return res.status(400).send(`No .stl files found in ${resolvedFolder}`);
   }
 
-  const o = (req.query.o || '50').trim();
+  const defaultOutputCsv = path.join(resolvedFolder, 'base.csv');
+
+  // If this folder was already reviewed once (i.e. saved out to base.csv),
+  // reload its per-file d/rx/ry/rz as this visit's defaults instead of
+  // starting every file over from scratch. A query-string override (e.g.
+  // carried over from a rotation-viewer round trip) still wins over the
+  // CSV, same as it wins over the hardcoded '0'/'' defaults below.
+  const baseCsvByFilename = new Map();
+  let baseCsvO = null;
+  let baseCsvLoaded = false;
+  if (fs.existsSync(defaultOutputCsv)) {
+    try {
+      const { rows: baseCsvRows } = parseCSV(fs.readFileSync(defaultOutputCsv, 'utf8'));
+      for (const { row } of baseCsvRows) {
+        if (row.filename) baseCsvByFilename.set(row.filename, row);
+      }
+      if (baseCsvRows.length > 0) baseCsvO = baseCsvRows[0].row.o;
+      baseCsvLoaded = baseCsvByFilename.size > 0;
+    } catch (e) {
+      // Malformed base.csv shouldn't block the folder preview — fall back
+      // to the usual empty/zeroed defaults below.
+    }
+  }
+
+  const o = (req.query.o !== undefined ? req.query.o : (baseCsvO !== null ? baseCsvO : '50')).trim();
 
   const rows = files.map((filename, index) => {
     const idx = index + 1;
-    const dVal = req.query[`d_${idx}`] !== undefined ? req.query[`d_${idx}`] : '';
-    const rx = req.query[`rx_${idx}`] !== undefined ? req.query[`rx_${idx}`] : '0';
-    const ry = req.query[`ry_${idx}`] !== undefined ? req.query[`ry_${idx}`] : '0';
-    const rz = req.query[`rz_${idx}`] !== undefined ? req.query[`rz_${idx}`] : '0';
+    const baseRow = baseCsvByFilename.get(filename);
+    const dDefault = baseRow && baseRow.d !== undefined ? baseRow.d : '';
+    const rxDefault = baseRow && baseRow.rx !== undefined ? baseRow.rx : '0';
+    const ryDefault = baseRow && baseRow.ry !== undefined ? baseRow.ry : '0';
+    const rzDefault = baseRow && baseRow.rz !== undefined ? baseRow.rz : '0';
+
+    const dVal = req.query[`d_${idx}`] !== undefined ? req.query[`d_${idx}`] : dDefault;
+    const rx = req.query[`rx_${idx}`] !== undefined ? req.query[`rx_${idx}`] : rxDefault;
+    const ry = req.query[`ry_${idx}`] !== undefined ? req.query[`ry_${idx}`] : ryDefault;
+    const rz = req.query[`rz_${idx}`] !== undefined ? req.query[`rz_${idx}`] : rzDefault;
     const skipped = req.query[`skip_${idx}`] === '1';
 
     let thumbUrl = `/folder/preview/thumb?stlFolder=${encodeURIComponent(resolvedFolder)}`
@@ -408,10 +442,8 @@ app.get('/folder/preview', (req, res) => {
     return { idx, filename, dVal, rx, ry, rz, skipped, thumbUrl };
   });
 
-  const defaultOutputCsv = path.join(resolvedFolder, 'base.csv');
-
   res.render('folder_preview.njk', {
-    resolvedFolder, fileCount: files.length, o, rows, defaultOutputCsv, previewSize: PREVIEW_SIZE
+    resolvedFolder, fileCount: files.length, o, rows, defaultOutputCsv, baseCsvLoaded, previewSize: PREVIEW_SIZE
   });
 });
 
