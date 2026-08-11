@@ -163,11 +163,11 @@ Detailed documentation for the three models can be found here:
 
 > **TODO:** Add documentation describing the three available models.
 
-| Model         | Description |
-| ------------- | ----------- |
-| naive         | CNN layers (with MaxPooling) for both images together, followed by dense layers for depth forecasting        |
-| stereo        | similar to "naive", but with separate convolutional layers for each image, later merged into dense layers    |
-| double_resnet | Two ResNet networks, one for each image (left/right), and then dense layers processing only the diff and correlation between the two ResNet outputs        |
+| Model            | Description |
+| ---------------- | ----------- |
+| naive            | CNN layers (with MaxPooling) for both images together, followed by dense layers for depth forecasting        |
+| stereo_branches  | similar to "naive", but with separate convolutional layers for each image, later merged into dense layers    |
+| double_resnet    | Two ResNet networks, one for each image (left/right), and then dense layers processing only the diff and correlation between the two ResNet outputs        |
 
 The model can be selected setting the `MODEL` parameter in the notebook's second cell.
 
